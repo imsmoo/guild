@@ -330,19 +330,31 @@ async function pushCloud(){
   pushing = true;
   try {
     const body = payload();
-    if (!body.history.length && !allowEmptyHistory) {
-      const cur = await fetch(url);
-      const remote = cur.ok ? await cur.json() : null;
-      const remoteHistory = remote && Array.isArray(remote.history) ? remote.history : [];
-      if (remoteHistory.length) {
-        state.history = remoteHistory;
-        body.history = remoteHistory;
-        body.historyCount = remoteHistory.length;
-        localStorage.setItem(KEY, JSON.stringify(state));
-        renderHistory();
-      }
+    const cur = await fetch(url);
+    const remote = cur.ok ? await cur.json() : null;
+    const remoteHistory = remote && Array.isArray(remote.history) ? remote.history : [];
+    if (!body.history.length && remoteHistory.length && !allowEmptyHistory) {
+      state.history = remoteHistory;
+      body.history = remoteHistory;
+      body.historyCount = remoteHistory.length;
     } else if (body.history.length) allowEmptyHistory = false;
-    await fetch(url, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const richness = doc => (doc && Array.isArray(doc.members) ? doc.members.length : 0) * 10 + (doc && Array.isArray(doc.rewards) ? doc.rewards.length : 0) * 5 + (doc && Array.isArray(doc.bosses) ? doc.bosses.filter(b => b !== "악몽 보스").length : 0);
+    if (remote && richness(remote) > richness(body)) {
+      const keepHistory = body.history.length > remoteHistory.length ? body.history : remoteHistory;
+      Object.assign(state, remote);
+      state.history = keepHistory;
+      if (!Array.isArray(state.rewards)) state.rewards = [];
+      if (!Array.isArray(state.members)) state.members = [];
+      if (!Array.isArray(state.schedules)) state.schedules = [];
+      localStorage.setItem(KEY, JSON.stringify(state));
+      document.getElementById("title").textContent = state.guild || "우리 길드";
+      renderHistory();
+      renderMemberView();
+      if (leadMode) renderSettings();
+      pushing = false;
+      return;
+    }
+    await fetch(url, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload())});
   } catch (e) {}
   pushing = false;
 }
@@ -353,10 +365,17 @@ async function pullCloud(){
     const res = await fetch(url);
     if (!res.ok) return;
     const remote = await res.json();
-    if (!remote || !remote.members || (remote.rev||0) <= (state.rev||0)) return;
+    if (!remote || (remote.rev||0) <= (state.rev||0)) return;
+    if (!Array.isArray(remote.members) && !Array.isArray(remote.bosses)) return;
     const localHistory = Array.isArray(state.history) ? state.history.slice() : [];
+    const localMembers = Array.isArray(state.members) ? state.members.slice() : [];
+    const localRewards = Array.isArray(state.rewards) ? state.rewards.slice() : [];
+    const localBosses = Array.isArray(state.bosses) ? state.bosses.slice() : [];
     const remoteHistory = Array.isArray(remote.history) ? remote.history : null;
     Object.assign(state, remote);
+    if ((remote.members||[]).length < localMembers.length) state.members = localMembers;
+    if ((remote.rewards||[]).length < localRewards.length) state.rewards = localRewards;
+    if ((remote.bosses||[]).length < localBosses.length) state.bosses = localBosses;
     let restoreHistory = false;
     if (!remoteHistory) {
       state.history = localHistory;
