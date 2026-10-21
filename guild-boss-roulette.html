@@ -256,6 +256,7 @@
 <script>
 const KEY = "guild-boss-ledger-v3";
 const COLORS = ["#5b7c99","#3f8f86","#d08a3a","#8a6bb5","#c46b5a","#6d8f5a","#4f7ea8","#b08968"];
+const NO_BOSS = "보스 없음";
 const FLOORS = [
   {id:"0", label:"격전지하층"},
   {id:"1", label:"격전지"},
@@ -297,7 +298,7 @@ function ensureOccupation(){
   if (String(state.bossFloors["점령전보상"]) !== "4") { state.bossFloors["점령전보상"] = "4"; changed = true; }
   return changed;
 }
-if (ensureOccupation() || ensureGroups()) save();
+if (ensureOccupation() || ensureGroups() || ensureBossDrops()) save();
 if (queryDb) state.firebaseUrl = queryDb;
 if (queryRoom) state.room = queryRoom;
 function payload(){
@@ -306,7 +307,7 @@ function payload(){
     guild:state.guild, members:state.members, bosses:state.bosses, rewards:state.rewards||[],
     leader:state.leader||"", vice:state.vice||"", vice2:state.vice2||"",
     history, dps:state.dps||[], dpsByBoss:state.dpsByBoss||{}, bossFloors:state.bossFloors||{},
-    groups:state.groups||[], groupItems:state.groupItems||{},
+    groups:state.groups||[], groupItems:state.groupItems||{}, bossDrops:state.bossDrops||{},
     schedule:state.schedule||null, schedules:state.schedules||[], firebaseUrl:state.firebaseUrl, room:state.room, rev:state.rev||1
   };
   if (history.length || allowEmptyHistory) body.historyCount = history.length;
@@ -527,6 +528,43 @@ function rewardCategory(name){
   }
   return s || n || "기타";
 }
+function ensureBossDrops(){
+  if (state.bossDrops && typeof state.bossDrops === "object") return false;
+  const map = {};
+  (state.history||[]).forEach(h => {
+    const boss = h.boss || NO_BOSS;
+    if (!map[boss]) map[boss] = [];
+    normalizeRewards(h).forEach(r => {
+      const name = String(r.name||"").trim();
+      if (name && !map[boss].includes(name)) map[boss].push(name);
+    });
+  });
+  state.bossDrops = map;
+  return true;
+}
+function dropsOf(boss){
+  if (!boss || !state.bossDrops) return [];
+  const have = new Set(state.rewards || []);
+  return (state.bossDrops[boss] || []).filter(n => have.has(n));
+}
+function rememberDrops(boss, names){
+  if (!boss) return;
+  if (!state.bossDrops) state.bossDrops = {};
+  if (!Array.isArray(state.bossDrops[boss])) state.bossDrops[boss] = [];
+  names.forEach(n => { if (n && !state.bossDrops[boss].includes(n)) state.bossDrops[boss].push(n); });
+}
+function rewardGroupsFor(boss){
+  const preferred = dropsOf(boss);
+  const groups = rewardGroups();
+  if (!preferred.length) return groups;
+  const skip = new Set(preferred);
+  const rest = [];
+  groups.forEach(([cat, names]) => {
+    const left = names.filter(n => !skip.has(n));
+    if (left.length) rest.push([cat, left]);
+  });
+  return [["이 보스 보상", preferred]].concat(rest);
+}
 function rewardGroups(){
   const map = new Map();
   (state.groups || []).forEach(g => {
@@ -632,9 +670,9 @@ function renderPick(){
     document.getElementById("pickFloors").innerHTML = '<div class="muted" style="width:100%">장소</div>'+FLOORS.map(f => '<button type="button" class="floor-tab'+(f.id===pickFloor?" on":"")+'" data-pick-floor="'+f.id+'">'+f.label+"</button>").join("");
     document.querySelectorAll("[data-pick-floor]").forEach(el => el.onclick = () => { pickFloor = el.dataset.pickFloor; renderPick(); });
     const bosses = state.bosses.filter(b => floorOf(b) === pickFloor);
-    list.innerHTML = bosses.length
+    list.innerHTML = '<button type="button" class="boss-pick" data-pick-boss="'+NO_BOSS+'">'+NO_BOSS+'</button>'+(bosses.length
       ? '<div class="muted">보스</div>'+bosses.map(b => '<button type="button" class="boss-pick" data-pick-boss="'+esc(b)+'">'+esc(b)+"</button>").join("")
-      : "<p class='muted'>이 장소에 보스가 없습니다.</p>";
+      : "<p class='muted'>이 장소에 보스가 없습니다.</p>");
     list.querySelectorAll("[data-pick-boss]").forEach(el => el.onclick = () => {
       setBoss(el.dataset.pickBoss);
       document.getElementById("pickModal").classList.add("hidden");
@@ -643,7 +681,7 @@ function renderPick(){
     return;
   }
   document.getElementById("pickFloors").classList.add("hidden");
-  const groups = rewardGroups();
+  const groups = rewardGroupsFor(document.getElementById("boss").value);
   if (pickMode === "reward-add") {
     done.classList.remove("hidden");
     list.innerHTML = groups.length ? groups.map(([cat, names]) => '<div class="cat">'+esc(cat)+'</div>'+names.map(n => '<label class="inline" style="display:flex;margin:6px 0"><input type="checkbox" data-add-name="'+esc(n)+'">'+esc(n)+'</label>').join("")).join("") : "<p class='muted'>설정에서 보상을 추가하세요.</p>";
@@ -1158,6 +1196,7 @@ function build(){
   const winner = spins.length === 1 && spins[0].mode !== "share"
     ? spins[0].winner
     : (spins.length ? spins.map(r => r.name+" "+(r.mode==="share" ? (r.split||[]).map(s => s.name+" "+s.qty).join("/") : r.winner)).join(" · ") : "균등분배");
+  rememberDrops(document.getElementById("boss").value, rewards.map(r => r.name));
   if (!Array.isArray(state.schedules)) state.schedules = [];
   state.schedules.push({
     id:uid(), date:caught, startAt:when, boss:document.getElementById("boss").value,
@@ -1364,6 +1403,13 @@ function groupsOf(name){
   return (state.groups || []).filter(g => ((state.groupItems||{})[g] || []).includes(name));
 }
 let openGroup = "";
+let openBoss = "";
+function dropEditor(name){
+  if (openBoss !== name) return "";
+  const picked = new Set((state.bossDrops && state.bossDrops[name]) || []);
+  const boxes = (state.rewards||[]).map(n => '<label class="inline"><input type="checkbox" data-drop-boss="'+esc(name)+'" data-drop-name="'+esc(n)+'"'+(picked.has(n)?" checked":"")+">"+esc(n)+"</label>").join("");
+  return '<div class="group-body">'+(boxes || "<p class='muted'>보상을 먼저 추가하세요.</p>")+"</div>";
+}
 function renderSettings(){
   document.getElementById("guildName").value = state.guild || "";
   document.getElementById("firebaseUrl").value = state.firebaseUrl || "";
@@ -1371,10 +1417,10 @@ function renderSettings(){
   document.getElementById("leaderPick").innerHTML = "<option value=''>길마</option>"+state.members.map(m => "<option"+(m===state.leader?" selected":"")+">"+esc(m)+"</option>").join("");
   document.getElementById("vicePick").innerHTML = "<option value=''>부길마 1</option>"+state.members.map(m => "<option"+(m===state.vice?" selected":"")+">"+esc(m)+"</option>").join("");
   document.getElementById("vicePick2").innerHTML = "<option value=''>부길마 2</option>"+state.members.map(m => "<option"+(m===state.vice2?" selected":"")+">"+esc(m)+"</option>").join("");
-  document.getElementById("bossList").innerHTML = state.bosses.map((b,i) => {
+  document.getElementById("bossList").innerHTML = '<div style="margin-top:8px"><div class="row"><span>'+NO_BOSS+'</span><button type="button" class="ghost" data-open-boss="'+NO_BOSS+'">보상</button></div>'+dropEditor(NO_BOSS)+'</div>'+state.bosses.map((b,i) => {
     const f = floorOf(b);
     const opts = FLOORS.map(fl => '<option value="'+fl.id+'"'+(fl.id===f?" selected":"")+">"+fl.label+"</option>").join("");
-    return '<div class="row" style="margin-top:8px"><span>'+esc(b)+'</span><select data-boss-floor="'+i+'">'+opts+'</select><button type="button" class="danger" data-boss="'+i+'">삭제</button></div>';
+    return '<div style="margin-top:8px"><div class="row"><span>'+esc(b)+'</span><select data-boss-floor="'+i+'">'+opts+'</select><button type="button" class="ghost" data-open-boss="'+esc(b)+'">보상</button><button type="button" class="danger" data-boss="'+i+'">삭제</button></div>'+dropEditor(b)+'</div>';
   }).join("");
   document.querySelectorAll("[data-boss-floor]").forEach(el => el.onchange = () => {
     const name = state.bosses[Number(el.dataset.bossFloor)];
@@ -1389,10 +1435,24 @@ function renderSettings(){
     askDelete((name||"보스")+"을 지울까요?", () => {
       state.bosses.splice(i, 1);
       if (name && state.bossFloors) delete state.bossFloors[name];
+      if (name && state.bossDrops) delete state.bossDrops[name];
       save();
       fillSelects();
       renderSettings();
     });
+  });
+  document.querySelectorAll("[data-open-boss]").forEach(el => el.onclick = () => {
+    openBoss = openBoss === el.dataset.openBoss ? "" : el.dataset.openBoss;
+    renderSettings();
+  });
+  document.querySelectorAll("[data-drop-boss]").forEach(el => el.onchange = () => {
+    const boss = el.dataset.dropBoss;
+    const name = el.dataset.dropName;
+    if (!state.bossDrops) state.bossDrops = {};
+    if (!Array.isArray(state.bossDrops[boss])) state.bossDrops[boss] = [];
+    state.bossDrops[boss] = state.bossDrops[boss].filter(n => n !== name);
+    if (el.checked) state.bossDrops[boss].push(name);
+    save();
   });
   document.getElementById("memberEdit").innerHTML = state.members.map((m,i) => '<div class="row" style="margin-top:8px"><span>'+esc(m)+" · "+esc(roleOf(m))+'</span><button type="button" class="danger" data-member="'+i+'">삭제</button></div>').join("");
   document.querySelectorAll("[data-member]").forEach(el => el.onclick = () => {
@@ -1413,6 +1473,7 @@ function renderSettings(){
       (state.groups||[]).forEach(g => {
         if (state.groupItems && state.groupItems[g]) state.groupItems[g] = state.groupItems[g].filter(n => n !== name);
       });
+      if (state.bossDrops) Object.keys(state.bossDrops).forEach(b => { state.bossDrops[b] = (state.bossDrops[b]||[]).filter(n => n !== name); });
       save();
       fillSelects();
       renderSettings();
