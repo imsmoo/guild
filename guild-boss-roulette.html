@@ -209,32 +209,16 @@
     <h2 id="manageTitle" style="font-size:22px;margin-top:0">목록</h2>
     <div id="manageBoss">
       <div class="actions" style="margin-top:0">
-        <button type="button" class="btn" id="addBossGroupBtn" style="flex:0 0 48px">+</button>
+        <button type="button" class="btn" id="addPlaceBtn" style="flex:0 0 48px">+</button>
       </div>
-      <div id="bossGroupForm" class="row hidden">
-        <input id="newBossGroup" placeholder="격전지 일반 보스(해적)" />
-        <select id="newBossGroupFloor">
-          <option value="0">격전지하층</option>
-          <option value="1" selected>격전지</option>
-          <option value="5">격전지상층(1구역)</option>
-          <option value="2">격전지상층(2구역)</option>
-          <option value="3">격전지상층(3구역)</option>
-          <option value="4">점령전</option>
-        </select>
-        <button type="button" class="ghost" id="saveBossGroup">추가</button>
+      <div id="placeForm" class="row hidden">
+        <input id="newPlace" placeholder="격전지상층(1구역)" />
+        <button type="button" class="ghost" id="savePlace">추가</button>
       </div>
       <div class="row">
         <input id="newBoss" placeholder="보스 이름" />
-        <select id="newBossFloor">
-          <option value="0">격전지하층</option>
-          <option value="1" selected>격전지</option>
-          <option value="5">격전지상층(1구역)</option>
-          <option value="2">격전지상층(2구역)</option>
-          <option value="3">격전지상층(3구역)</option>
-          <option value="4">점령전</option>
-        </select>
+        <select id="newBossFloor"></select>
         <button type="button" class="ghost" id="addBoss">추가</button>
-        <select id="newBossGroupPick"><option value="">그룹 없음</option></select>
       </div>
       <div id="bossList"></div>
     </div>
@@ -321,8 +305,7 @@ if (!state.dpsByBoss) state.dpsByBoss = {};
 if (!state.bossFloors) state.bossFloors = {};
 if (!state.history) state.history = [];
 if (!Array.isArray(state.schedules)) state.schedules = [];
-if (!Array.isArray(state.bossGroups)) state.bossGroups = [];
-if (!state.bossGroupOf || typeof state.bossGroupOf !== "object") state.bossGroupOf = {};
+if (!Array.isArray(state.places)) state.places = [];
 function ensureOccupation(){
   let changed = false;
   if (!state.bosses.includes("점령전보상")) { state.bosses.push("점령전보상"); changed = true; }
@@ -340,7 +323,7 @@ function payload(){
     leader:state.leader||"", vice:state.vice||"", vice2:state.vice2||"",
     history, dps:state.dps||[], dpsByBoss:state.dpsByBoss||{}, bossFloors:state.bossFloors||{},
     groups:state.groups||[], groupItems:state.groupItems||{}, bossDrops:state.bossDrops||{},
-    bossGroups:state.bossGroups||[], bossGroupOf:state.bossGroupOf||{},
+    bossGroups:state.bossGroups||[], bossGroupOf:state.bossGroupOf||{}, places:state.places||[],
     schedule:state.schedule||null, schedules:state.schedules||[], firebaseUrl:state.firebaseUrl, room:state.room, rev:state.rev||1
   };
   if (history.length || allowEmptyHistory) body.historyCount = history.length;
@@ -466,8 +449,14 @@ function floorOf(name){
   if (state.bossFloors && state.bossFloors[name]) return String(state.bossFloors[name]);
   return guessFloor(name);
 }
+function floors(){
+  return FLOORS.concat(Array.isArray(state.places) ? state.places : []);
+}
+function floorOptions(selected){
+  return floors().map(fl => '<option value="'+esc(fl.id)+'"'+(String(fl.id)===String(selected)?" selected":"")+">"+esc(fl.label)+"</option>").join("");
+}
 function floorLabel(id){
-  const f = FLOORS.find(x => x.id === String(id));
+  const f = floors().find(x => x.id === String(id));
   return f ? f.label : "격전지";
 }
 document.getElementById("caughtDate").value = today();
@@ -581,8 +570,6 @@ function dropsOf(boss){
   const names = [];
   const add = n => { if (have.has(n) && !names.includes(n)) names.push(n); };
   (state.bossDrops[boss] || []).forEach(add);
-  const parent = state.bossGroupOf && state.bossGroupOf[boss];
-  if (parent) (state.bossDrops[parent] || []).forEach(add);
   return names;
 }
 function rememberDrops(boss, names){
@@ -706,21 +693,12 @@ function renderPick(){
   if (pickMode === "boss") {
     done.classList.add("hidden");
     document.getElementById("pickFloors").classList.remove("hidden");
-    document.getElementById("pickFloors").innerHTML = '<div class="muted" style="width:100%">장소</div>'+FLOORS.map(f => '<button type="button" class="floor-tab'+(f.id===pickFloor?" on":"")+'" data-pick-floor="'+f.id+'">'+f.label+"</button>").join("");
+    document.getElementById("pickFloors").innerHTML = '<div class="muted" style="width:100%">장소</div>'+floors().map(f => '<button type="button" class="floor-tab'+(f.id===pickFloor?" on":"")+'" data-pick-floor="'+f.id+'">'+esc(f.label)+"</button>").join("");
     document.querySelectorAll("[data-pick-floor]").forEach(el => el.onclick = () => { pickFloor = el.dataset.pickFloor; renderPick(); });
     const bosses = state.bosses.filter(b => floorOf(b) === pickFloor);
-    const groups = (state.bossGroups||[]).filter(g => floorOf(g) === pickFloor);
-    let html = '<button type="button" class="boss-pick" data-pick-boss="'+NO_BOSS+'">'+NO_BOSS+'</button>';
-    const used = new Set();
-    groups.forEach(g => {
-      const kids = bosses.filter(b => (state.bossGroupOf||{})[b] === g);
-      kids.forEach(b => used.add(b));
-      html += '<div class="cat">'+esc(g)+'</div><button type="button" class="boss-pick" data-pick-boss="'+esc(g)+'">'+esc(g)+"</button>"+kids.map(b => '<button type="button" class="boss-pick" data-pick-boss="'+esc(b)+'">'+esc(b)+"</button>").join("");
-    });
-    const loose = bosses.filter(b => !used.has(b));
-    if (loose.length) html += '<div class="muted">보스</div>'+loose.map(b => '<button type="button" class="boss-pick" data-pick-boss="'+esc(b)+'">'+esc(b)+"</button>").join("");
-    if (!groups.length && !loose.length) html += "<p class='muted'>이 장소에 보스가 없습니다.</p>";
-    list.innerHTML = html;
+    list.innerHTML = '<button type="button" class="boss-pick" data-pick-boss="'+NO_BOSS+'">'+NO_BOSS+'</button>'+(bosses.length
+      ? '<div class="muted">보스</div>'+bosses.map(b => '<button type="button" class="boss-pick" data-pick-boss="'+esc(b)+'">'+esc(b)+"</button>").join("")
+      : "<p class='muted'>이 장소에 보스가 없습니다.</p>");
     list.querySelectorAll("[data-pick-boss]").forEach(el => el.onclick = () => {
       setBoss(el.dataset.pickBoss);
       document.getElementById("pickModal").classList.add("hidden");
@@ -1465,59 +1443,30 @@ function renderSettings(){
   document.getElementById("leaderPick").innerHTML = "<option value=''>길마</option>"+state.members.map(m => "<option"+(m===state.leader?" selected":"")+">"+esc(m)+"</option>").join("");
   document.getElementById("vicePick").innerHTML = "<option value=''>부길마 1</option>"+state.members.map(m => "<option"+(m===state.vice?" selected":"")+">"+esc(m)+"</option>").join("");
   document.getElementById("vicePick2").innerHTML = "<option value=''>부길마 2</option>"+state.members.map(m => "<option"+(m===state.vice2?" selected":"")+">"+esc(m)+"</option>").join("");
-  const groupPick = '<option value="">그룹 없음</option>'+(state.bossGroups||[]).map(g => '<option value="'+esc(g)+'">'+esc(g)+"</option>").join("");
-  const groupSel = document.getElementById("newBossGroupPick");
-  if (groupSel) groupSel.innerHTML = groupPick;
-  const bossRow = b => {
-    const i = state.bosses.indexOf(b);
+  const floorSel = document.getElementById("newBossFloor");
+  if (floorSel) floorSel.innerHTML = floorOptions(floorSel.value || "1");
+  const places = (state.places||[]).map((p,i) => '<div class="row" style="margin-top:8px"><span>'+esc(p.label)+'</span><button type="button" class="danger" data-del-place="'+i+'">삭제</button></div>').join("");
+  const bossRows = state.bosses.map((b,i) => {
     const f = floorOf(b);
-    const opts = FLOORS.map(fl => '<option value="'+fl.id+'"'+(fl.id===f?" selected":"")+">"+fl.label+"</option>").join("");
-    const gnow = (state.bossGroupOf||{})[b] || "";
-    const gopts = '<option value="">그룹 없음</option>'+(state.bossGroups||[]).map(g => '<option value="'+esc(g)+'"'+(g===gnow?" selected":"")+">"+esc(g)+"</option>").join("");
-    return '<div style="margin-top:8px"><div class="row"><span>'+esc(b)+'</span><select data-boss-floor="'+i+'">'+opts+'</select><select data-boss-group="'+i+'">'+gopts+'</select><button type="button" class="ghost" data-open-boss="'+esc(b)+'">보상</button><button type="button" class="danger" data-boss="'+i+'">삭제</button></div>'+dropEditor(b)+'</div>';
-  };
-  const placed = new Set();
-  const groupBlocks = (state.bossGroups||[]).map(g => {
-    const kids = state.bosses.filter(b => (state.bossGroupOf||{})[b] === g);
-    kids.forEach(b => placed.add(b));
-    const f = floorOf(g);
-    const opts = FLOORS.map(fl => '<option value="'+fl.id+'"'+(fl.id===f?" selected":"")+">"+fl.label+"</option>").join("");
-    return '<div class="group-card"><div class="row"><span>'+esc(g)+'</span><select data-bgroup-floor="'+esc(g)+'">'+opts+'</select><button type="button" class="ghost" data-open-boss="'+esc(g)+'">보상</button><button type="button" class="danger" data-del-bgroup="'+esc(g)+'">삭제</button></div>'+dropEditor(g)+kids.map(bossRow).join("")+"</div>";
+    return '<div style="margin-top:8px"><div class="row"><span>'+esc(b)+'</span><select data-boss-floor="'+i+'">'+floorOptions(f)+'</select><button type="button" class="ghost" data-open-boss="'+esc(b)+'">보상</button><button type="button" class="danger" data-boss="'+i+'">삭제</button></div>'+dropEditor(b)+'</div>';
   }).join("");
-  const loose = state.bosses.filter(b => !placed.has(b)).map(bossRow).join("");
-  document.getElementById("bossList").innerHTML = groupBlocks+loose+'<div style="margin-top:8px"><div class="row"><span>'+NO_BOSS+'</span><button type="button" class="ghost" data-open-boss="'+NO_BOSS+'">보상</button></div>'+dropEditor(NO_BOSS)+'</div>';
+  document.getElementById("bossList").innerHTML = places+bossRows+'<div style="margin-top:8px"><div class="row"><span>'+NO_BOSS+'</span><button type="button" class="ghost" data-open-boss="'+NO_BOSS+'">보상</button></div>'+dropEditor(NO_BOSS)+'</div>';
+  document.querySelectorAll("[data-del-place]").forEach(el => el.onclick = () => {
+    const i = Number(el.dataset.delPlace);
+    const place = (state.places||[])[i];
+    if (!place) return;
+    askDelete(place.label+" 장소를 지울까요?", () => {
+      state.places.splice(i, 1);
+      save();
+      renderSettings();
+    });
+  });
   document.querySelectorAll("[data-boss-floor]").forEach(el => el.onchange = () => {
     const name = state.bosses[Number(el.dataset.bossFloor)];
     if (!name) return;
     if (!state.bossFloors) state.bossFloors = {};
     state.bossFloors[name] = el.value;
     save();
-  });
-  document.querySelectorAll("[data-boss-group]").forEach(el => el.onchange = () => {
-    const name = state.bosses[Number(el.dataset.bossGroup)];
-    if (!name) return;
-    if (!state.bossGroupOf) state.bossGroupOf = {};
-    if (el.value) state.bossGroupOf[name] = el.value;
-    else delete state.bossGroupOf[name];
-    save();
-    renderSettings();
-  });
-  document.querySelectorAll("[data-bgroup-floor]").forEach(el => el.onchange = () => {
-    if (!state.bossFloors) state.bossFloors = {};
-    state.bossFloors[el.dataset.bgroupFloor] = el.value;
-    save();
-  });
-  document.querySelectorAll("[data-del-bgroup]").forEach(el => el.onclick = () => {
-    const g = el.dataset.delBgroup;
-    askDelete(g+" 그룹을 지울까요? 보스는 남습니다.", () => {
-      state.bossGroups = (state.bossGroups||[]).filter(x => x !== g);
-      Object.keys(state.bossGroupOf||{}).forEach(b => { if (state.bossGroupOf[b] === g) delete state.bossGroupOf[b]; });
-      if (state.bossDrops) delete state.bossDrops[g];
-      if (state.bossFloors) delete state.bossFloors[g];
-      if (openBoss === g) openBoss = "";
-      save();
-      renderSettings();
-    });
   });
   document.querySelectorAll("[data-boss]").forEach(el => el.onclick = () => {
     const i = Number(el.dataset.boss);
@@ -1526,7 +1475,6 @@ function renderSettings(){
       state.bosses.splice(i, 1);
       if (name && state.bossFloors) delete state.bossFloors[name];
       if (name && state.bossDrops) delete state.bossDrops[name];
-      if (name && state.bossGroupOf) delete state.bossGroupOf[name];
       save();
       fillSelects();
       renderSettings();
@@ -1626,21 +1574,19 @@ function renderSettings(){
     });
   });
 }
-document.getElementById("addBossGroupBtn").onclick = () => {
-  const form = document.getElementById("bossGroupForm");
+document.getElementById("addPlaceBtn").onclick = () => {
+  const form = document.getElementById("placeForm");
   form.classList.toggle("hidden");
-  if (!form.classList.contains("hidden")) document.getElementById("newBossGroup").focus();
+  if (!form.classList.contains("hidden")) document.getElementById("newPlace").focus();
 };
-document.getElementById("saveBossGroup").onclick = () => {
-  const name = document.getElementById("newBossGroup").value.trim();
+document.getElementById("savePlace").onclick = () => {
+  const name = document.getElementById("newPlace").value.trim();
   if (!name) return;
-  if (!Array.isArray(state.bossGroups)) state.bossGroups = [];
-  if (state.bossGroups.includes(name) || state.bosses.includes(name)) return alert("이미 있는 이름입니다.");
-  state.bossGroups.push(name);
-  if (!state.bossFloors) state.bossFloors = {};
-  state.bossFloors[name] = document.getElementById("newBossGroupFloor").value || "1";
-  document.getElementById("newBossGroup").value = "";
-  document.getElementById("bossGroupForm").classList.add("hidden");
+  if (!Array.isArray(state.places)) state.places = [];
+  if (floors().some(f => f.label === name)) return alert("이미 있는 장소입니다.");
+  state.places.push({id:"c"+uid(), label:name});
+  document.getElementById("newPlace").value = "";
+  document.getElementById("placeForm").classList.add("hidden");
   save();
   renderSettings();
 };
@@ -1650,11 +1596,6 @@ document.getElementById("addBoss").onclick = () => {
   state.bosses.push(name);
   if (!state.bossFloors) state.bossFloors = {};
   state.bossFloors[name] = document.getElementById("newBossFloor").value || "1";
-  const group = document.getElementById("newBossGroupPick").value;
-  if (group) {
-    if (!state.bossGroupOf) state.bossGroupOf = {};
-    state.bossGroupOf[name] = group;
-  }
   document.getElementById("newBoss").value = "";
   save();
   fillSelects();
