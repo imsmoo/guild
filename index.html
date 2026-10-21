@@ -37,8 +37,9 @@
   .row { display:flex; gap:8px; align-items:center; }
   .row > * { flex:1; }
   .row > .nudge-col { flex:0 0 auto; }
-  .nudge-col { display:flex; flex-direction:column; }
-  button.nudge { width:22px; height:16px; padding:0; border:0; border-radius:4px; background:transparent; box-shadow:none; color:#8a5a2b; font-size:11px; line-height:16px; }
+  .nudge-col { display:flex; flex-direction:column; touch-action:none; cursor:grab; user-select:none; }
+  .nudge { width:22px; height:16px; padding:0; border:0; background:transparent; box-shadow:none; color:#8a5a2b; font-size:11px; line-height:16px; text-align:center; pointer-events:none; }
+  .drag-row.dragging { opacity:.45; }
   .line { display:grid; grid-template-columns:1fr 88px auto; gap:8px; margin-bottom:8px; }
   .reward-line { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
   .reward-line .reward-name { flex:1 1 140px; font-weight:800; }
@@ -1454,6 +1455,68 @@ function dropEditor(name){
   const boxes = (state.rewards||[]).map(n => '<label class="inline"><input type="checkbox" data-drop-boss="'+esc(name)+'" data-drop-name="'+esc(n)+'"'+(picked.has(n)?" checked":"")+">"+esc(n)+"</label>").join("");
   return '<div class="group-body">'+(boxes || "<p class='muted'>보상을 먼저 추가하세요.</p>")+"</div>";
 }
+let drag = null;
+function beginDrag(e, handle){
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  const row = handle.closest("[data-drag-row]");
+  if (!row || !row.parentElement) return;
+  e.preventDefault();
+  e.stopPropagation();
+  try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+  handle.onpointermove = onDragMove;
+  handle.onpointerup = onDragEnd;
+  handle.onpointercancel = onDragEnd;
+  drag = {
+    pointer: e.pointerId,
+    row,
+    list: row.parentElement,
+    kind: handle.dataset.drag,
+    group: handle.dataset.g || "",
+    base: [...row.parentElement.querySelectorAll(":scope > [data-drag-row]")].map(r => r.dataset.key)
+  };
+  row.classList.add("dragging");
+}
+function onDragMove(e){
+  if (!drag || e.pointerId !== drag.pointer) return;
+  const rows = [...drag.list.querySelectorAll(":scope > [data-drag-row]")];
+  const y = e.clientY;
+  const hit = rows.find(r => {
+    if (r === drag.row) return false;
+    const b = r.getBoundingClientRect();
+    return y >= b.top && y <= b.bottom;
+  });
+  if (!hit) return;
+  const from = rows.indexOf(drag.row);
+  const to = rows.indexOf(hit);
+  if (from < to) hit.after(drag.row);
+  else hit.before(drag.row);
+}
+function onDragEnd(e){
+  if (!drag || (e && e.pointerId !== drag.pointer)) return;
+  drag.row.classList.remove("dragging");
+  const order = [...drag.list.querySelectorAll(":scope > [data-drag-row]")].map(r => r.dataset.key);
+  const kind = drag.kind;
+  const group = drag.group;
+  const same = order.join("\0") === drag.base.join("\0");
+  drag = null;
+  if (same) return;
+  if (kind === "reward") {
+    const extra = state.rewards.filter(n => !order.includes(n));
+    state.rewards = order.filter(n => state.rewards.includes(n)).concat(extra);
+  } else if (kind === "group") {
+    const extra = (state.groups||[]).filter(n => !order.includes(n));
+    state.groups = order.filter(n => (state.groups||[]).includes(n)).concat(extra);
+  } else if (kind === "gitem" && state.groupItems) {
+    const cur = state.groupItems[group] || [];
+    const extra = cur.filter(n => !order.includes(n));
+    state.groupItems[group] = order.filter(n => cur.includes(n)).concat(extra);
+  }
+  save();
+  renderSettings();
+}
+document.addEventListener("pointermove", onDragMove);
+document.addEventListener("pointerup", onDragEnd);
+document.addEventListener("pointercancel", onDragEnd);
 function renderSettings(){
   document.getElementById("guildName").value = state.guild || "";
   document.getElementById("firebaseUrl").value = state.firebaseUrl || "";
@@ -1537,17 +1600,7 @@ function renderSettings(){
       renderSettings();
     });
   });
-  document.getElementById("rewardList").innerHTML = (state.rewards||[]).map((b,i) => '<div class="row" style="margin-top:8px"><span>'+esc(b)+(groupsOf(b).length?'<span class="muted"> · '+esc(groupsOf(b).join(", "))+'</span>':"")+'</span><span class="nudge-col"><button type="button" class="nudge" data-rmove="-1" data-ri="'+i+'">▲</button><button type="button" class="nudge" data-rmove="1" data-ri="'+i+'">▼</button></span><button type="button" class="danger" data-reward="'+i+'">삭제</button></div>').join("");
-  document.querySelectorAll("[data-rmove]").forEach(el => el.onclick = () => {
-    const i = Number(el.dataset.ri);
-    const j = i + Number(el.dataset.rmove);
-    if (j < 0 || j >= state.rewards.length) return;
-    const t = state.rewards[i];
-    state.rewards[i] = state.rewards[j];
-    state.rewards[j] = t;
-    save();
-    renderSettings();
-  });
+  document.getElementById("rewardList").innerHTML = (state.rewards||[]).map((b,i) => '<div class="row drag-row" data-drag-row data-key="'+esc(b)+'" style="margin-top:8px"><span>'+esc(b)+(groupsOf(b).length?'<span class="muted"> · '+esc(groupsOf(b).join(", "))+'</span>':"")+'</span><span class="nudge-col" data-drag="reward"><span class="nudge">▲</span><span class="nudge">▼</span></span><button type="button" class="danger" data-reward="'+i+'">삭제</button></div>').join("");
   document.querySelectorAll("[data-reward]").forEach(el => el.onclick = () => {
     const i = Number(el.dataset.reward);
     const name = state.rewards[i];
@@ -1566,10 +1619,10 @@ function renderSettings(){
   document.getElementById("groupList").innerHTML = groups.length ? groups.map((g, gi) => {
     const items = ((state.groupItems||{})[g] || []).filter(n => (state.rewards||[]).includes(n));
     const open = openGroup === g;
-    const ordered = items.map((n,i) => '<div class="row"><span>'+esc(n)+'</span><span class="nudge-col"><button type="button" class="nudge" data-gmove="'+esc(g)+'" data-gi="'+i+'" data-dir="-1">▲</button><button type="button" class="nudge" data-gmove="'+esc(g)+'" data-gi="'+i+'" data-dir="1">▼</button></span></div>').join("");
+    const ordered = items.map(n => '<div class="row drag-row" data-drag-row data-key="'+esc(n)+'"><span>'+esc(n)+'</span><span class="nudge-col" data-drag="gitem" data-g="'+esc(g)+'"><span class="nudge">▲</span><span class="nudge">▼</span></span></div>').join("");
     const checks = (state.rewards||[]).map(n => '<label class="inline"><input type="checkbox" data-gitem="'+esc(g)+'" data-gname="'+esc(n)+'"'+((items.includes(n))?" checked":"")+">"+esc(n)+"</label>").join("");
     const body = open ? '<div class="group-body">'+(ordered || "<p class='muted'>체크해서 넣으세요.</p>")+'<div class="muted">넣기 / 빼기</div>'+checks+"</div>" : "";
-    return '<div class="group-card"><div style="display:flex;gap:8px;align-items:center"><button type="button" class="floor-tab'+(open?" on":"")+'" data-group="'+esc(g)+'" style="flex:1">'+esc(g)+" "+items.length+'</button><span class="nudge-col"><button type="button" class="nudge" data-grmove="-1" data-gri="'+gi+'">▲</button><button type="button" class="nudge" data-grmove="1" data-gri="'+gi+'">▼</button></span><button type="button" class="danger" data-del-group="'+esc(g)+'" style="flex:0 0 auto">삭제</button></div>'+body+"</div>";
+    return '<div class="group-card drag-row" data-drag-row data-key="'+esc(g)+'"><div style="display:flex;gap:8px;align-items:center"><button type="button" class="floor-tab'+(open?" on":"")+'" data-group="'+esc(g)+'" style="flex:1">'+esc(g)+" "+items.length+'</button><span class="nudge-col" data-drag="group"><span class="nudge">▲</span><span class="nudge">▼</span></span><button type="button" class="danger" data-del-group="'+esc(g)+'" style="flex:0 0 auto">삭제</button></div>'+body+"</div>";
   }).join("") : "<p class='muted'>그룹을 추가하세요.</p>";
   document.querySelectorAll("[data-group]").forEach(el => el.onclick = () => {
     openGroup = openGroup === el.dataset.group ? "" : el.dataset.group;
@@ -1584,28 +1637,8 @@ function renderSettings(){
     save();
     renderSettings();
   });
-  document.querySelectorAll("[data-grmove]").forEach(el => el.onclick = () => {
-    const i = Number(el.dataset.gri);
-    const j = i + Number(el.dataset.grmove);
-    if (!state.groups || j < 0 || j >= state.groups.length) return;
-    const t = state.groups[i];
-    state.groups[i] = state.groups[j];
-    state.groups[j] = t;
-    save();
-    renderSettings();
-  });
-  document.querySelectorAll("[data-gmove]").forEach(el => el.onclick = () => {
-    const g = el.dataset.gmove;
-    const list = (state.groupItems[g] || []).filter(n => (state.rewards||[]).includes(n));
-    const i = Number(el.dataset.gi);
-    const j = i + Number(el.dataset.dir);
-    if (j < 0 || j >= list.length) return;
-    const t = list[i];
-    list[i] = list[j];
-    list[j] = t;
-    state.groupItems[g] = list;
-    save();
-    renderSettings();
+  document.querySelectorAll(".nudge-col[data-drag]").forEach(handle => {
+    handle.onpointerdown = e => beginDrag(e, handle);
   });
   document.querySelectorAll("[data-del-group]").forEach(el => el.onclick = () => {
     const g = el.dataset.delGroup;
