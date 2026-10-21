@@ -36,6 +36,7 @@
   input,select { width:100%; background:#fff; border:3px solid #6b4423; border-radius:10px; padding:10px 12px; }
   .row { display:flex; gap:8px; align-items:center; }
   .row > * { flex:1; }
+  .row > .nudge { flex:0 0 40px; padding:8px 0; }
   .line { display:grid; grid-template-columns:1fr 88px auto; gap:8px; margin-bottom:8px; }
   .reward-line { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
   .reward-line .reward-name { flex:1 1 140px; font-weight:800; }
@@ -1464,7 +1465,17 @@ function renderSettings(){
       renderSettings();
     });
   });
-  document.getElementById("rewardList").innerHTML = (state.rewards||[]).map((b,i) => '<div class="row" style="margin-top:8px"><span>'+esc(b)+(groupsOf(b).length?'<span class="muted"> · '+esc(groupsOf(b).join(", "))+'</span>':"")+'</span><button type="button" class="danger" data-reward="'+i+'">삭제</button></div>').join("");
+  document.getElementById("rewardList").innerHTML = (state.rewards||[]).map((b,i) => '<div class="row" style="margin-top:8px"><span>'+esc(b)+(groupsOf(b).length?'<span class="muted"> · '+esc(groupsOf(b).join(", "))+'</span>':"")+'</span><button type="button" class="nudge" data-rmove="-1" data-ri="'+i+'">▲</button><button type="button" class="nudge" data-rmove="1" data-ri="'+i+'">▼</button><button type="button" class="danger" data-reward="'+i+'">삭제</button></div>').join("");
+  document.querySelectorAll("[data-rmove]").forEach(el => el.onclick = () => {
+    const i = Number(el.dataset.ri);
+    const j = i + Number(el.dataset.rmove);
+    if (j < 0 || j >= state.rewards.length) return;
+    const t = state.rewards[i];
+    state.rewards[i] = state.rewards[j];
+    state.rewards[j] = t;
+    save();
+    renderSettings();
+  });
   document.querySelectorAll("[data-reward]").forEach(el => el.onclick = () => {
     const i = Number(el.dataset.reward);
     const name = state.rewards[i];
@@ -1483,7 +1494,9 @@ function renderSettings(){
   document.getElementById("groupList").innerHTML = groups.length ? groups.map(g => {
     const items = ((state.groupItems||{})[g] || []).filter(n => (state.rewards||[]).includes(n));
     const open = openGroup === g;
-    const body = open ? '<div class="group-body">'+(state.rewards||[]).map(n => '<label class="inline"><input type="checkbox" data-gitem="'+esc(g)+'" data-gname="'+esc(n)+'"'+((items.includes(n))?" checked":"")+">"+esc(n)+"</label>").join("")+"</div>" : "";
+    const ordered = items.map((n,i) => '<div class="row"><span>'+esc(n)+'</span><button type="button" class="nudge" data-gmove="'+esc(g)+'" data-gi="'+i+'" data-dir="-1">▲</button><button type="button" class="nudge" data-gmove="'+esc(g)+'" data-gi="'+i+'" data-dir="1">▼</button></div>').join("");
+    const checks = (state.rewards||[]).map(n => '<label class="inline"><input type="checkbox" data-gitem="'+esc(g)+'" data-gname="'+esc(n)+'"'+((items.includes(n))?" checked":"")+">"+esc(n)+"</label>").join("");
+    const body = open ? '<div class="group-body">'+(ordered || "<p class='muted'>체크해서 넣으세요.</p>")+'<div class="muted">넣기 / 빼기</div>'+checks+"</div>" : "";
     return '<div class="group-card"><div style="display:flex;gap:8px;align-items:center"><button type="button" class="floor-tab'+(open?" on":"")+'" data-group="'+esc(g)+'" style="flex:1">'+esc(g)+" "+items.length+'</button><button type="button" class="danger" data-del-group="'+esc(g)+'" style="flex:0 0 auto">삭제</button></div>'+body+"</div>";
   }).join("") : "<p class='muted'>그룹을 추가하세요.</p>";
   document.querySelectorAll("[data-group]").forEach(el => el.onclick = () => {
@@ -1496,6 +1509,19 @@ function renderSettings(){
     if (!state.groupItems[g]) state.groupItems[g] = [];
     state.groupItems[g] = state.groupItems[g].filter(x => x !== n);
     if (el.checked) state.groupItems[g].push(n);
+    save();
+    renderSettings();
+  });
+  document.querySelectorAll("[data-gmove]").forEach(el => el.onclick = () => {
+    const g = el.dataset.gmove;
+    const list = (state.groupItems[g] || []).filter(n => (state.rewards||[]).includes(n));
+    const i = Number(el.dataset.gi);
+    const j = i + Number(el.dataset.dir);
+    if (j < 0 || j >= list.length) return;
+    const t = list[i];
+    list[i] = list[j];
+    list[j] = t;
+    state.groupItems[g] = list;
     save();
     renderSettings();
   });
