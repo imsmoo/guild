@@ -80,6 +80,7 @@
   .pick-row { display:block; width:100%; text-align:left; background:#fff8e8; border:2px solid #c9843a; border-radius:12px; box-shadow:none; padding:12px; margin-top:8px; font-weight:800; color:#3a2414; }
   .group-card { margin-top:10px; }
   .group-body { display:flex; flex-direction:column; gap:6px; max-height:240px; overflow:auto; margin-top:8px; padding:8px; background:#fff8e8; border:2px solid #e7cba6; border-radius:12px; }
+  #manageModal .group-body { max-height:46vh; }
   #askModal { z-index:40; }
   .muted { color:var(--muted); }
   .bar { height:8px; background:#f0d7a2; border-radius:99px; overflow:hidden; border:2px solid #2b1a0e; }
@@ -161,29 +162,12 @@
       <div class="card">
         <label>길드명</label>
         <div class="row"><input id="guildName" /><button type="button" class="btn" id="saveGuild">변경</button></div>
-        <label>보스 목록</label>
-        <div class="row">
-          <input id="newBoss" placeholder="보스 이름" />
-          <select id="newBossFloor">
-            <option value="0">격전지하층</option>
-            <option value="1" selected>격전지</option>
-            <option value="5">격전지상층(1구역)</option>
-            <option value="2">격전지상층(2구역)</option>
-            <option value="3">격전지상층(3구역)</option>
-            <option value="4">점령전</option>
-          </select>
-          <button type="button" class="ghost" id="addBoss">추가</button>
-        </div>
-        <div id="bossList"></div>
         <label>길마 · 부길마</label>
         <div class="row"><select id="leaderPick"></select><select id="vicePick"></select><select id="vicePick2"></select></div>
         <div class="actions"><button type="button" class="btn" id="saveRoles">직책 저장</button></div>
-        <label>보상 목록</label>
-        <div class="row"><input id="newReward" placeholder="보상 이름" /><button type="button" class="ghost" id="addReward">추가</button></div>
-        <div id="rewardList"></div>
-        <label>그룹</label>
-        <div class="row"><input id="newGroup" placeholder="모자, 장갑, 점령지" /><button type="button" class="ghost" id="addGroup">그룹 추가</button></div>
-        <div id="groupList"></div>
+        <button type="button" class="pick-row" id="openBosses">보스 목록</button>
+        <button type="button" class="pick-row" id="openRewards">보상 목록</button>
+        <button type="button" class="pick-row" id="openGroups">그룹</button>
         <label>길드원 추가</label>
         <div class="row"><input id="newMember" placeholder="이름" /><button type="button" class="ghost" id="addMember">추가</button></div>
         <div id="memberEdit"></div>
@@ -219,6 +203,35 @@
 </div>
 <div id="modal" class="modal-back hidden">
   <div class="modal"><div class="muted" id="winKicker">당첨</div><h2 id="winName"></h2><div id="winDetail"></div><p style="font-weight:800;margin:14px 0 0">카카오톡에 공유할까요?</p><div class="actions" style="justify-content:center"><button type="button" class="btn" id="shareYes">예</button><button type="button" class="ghost" id="closeModal">아니오</button></div></div>
+</div>
+<div id="manageModal" class="modal-back hidden">
+  <div class="modal" style="text-align:left">
+    <h2 id="manageTitle" style="font-size:22px;margin-top:0">목록</h2>
+    <div id="manageBoss">
+      <div class="row">
+        <input id="newBoss" placeholder="보스 이름" />
+        <select id="newBossFloor">
+          <option value="0">격전지하층</option>
+          <option value="1" selected>격전지</option>
+          <option value="5">격전지상층(1구역)</option>
+          <option value="2">격전지상층(2구역)</option>
+          <option value="3">격전지상층(3구역)</option>
+          <option value="4">점령전</option>
+        </select>
+        <button type="button" class="ghost" id="addBoss">추가</button>
+      </div>
+      <div id="bossList"></div>
+    </div>
+    <div id="manageReward" class="hidden">
+      <div class="row"><input id="newReward" placeholder="보상 이름" /><button type="button" class="ghost" id="addReward">추가</button></div>
+      <div id="rewardList"></div>
+    </div>
+    <div id="manageGroup" class="hidden">
+      <div class="row"><input id="newGroup" placeholder="모자, 장갑, 점령지" /><button type="button" class="ghost" id="addGroup">그룹 추가</button></div>
+      <div id="groupList"></div>
+    </div>
+    <div class="actions"><button type="button" class="ghost" id="manageClose">닫기</button></div>
+  </div>
 </div>
 <div id="pickModal" class="modal-back hidden">
   <div class="modal" style="text-align:left">
@@ -633,6 +646,7 @@ function applyBack(){
     document.getElementById("askModal").classList.add("hidden");
     return;
   }
+  if (layerOpen("manageModal")) { document.getElementById("manageModal").classList.add("hidden"); return; }
   if (layerOpen("splitModal")) { cancelSplit(); return; }
   if (layerOpen("pickModal")) { document.getElementById("pickModal").classList.add("hidden"); return; }
   if (layerOpen("modal")) { closeWinner(); return; }
@@ -1556,6 +1570,21 @@ document.getElementById("addReward").onclick = () => {
   save();
   fillSelects();
   renderSettings();
+};
+function openManage(panel, title){
+  ["manageBoss","manageReward","manageGroup"].forEach(id => document.getElementById(id).classList.toggle("hidden", id !== panel));
+  document.getElementById("manageTitle").textContent = title;
+  if (!layerOpen("manageModal")) {
+    document.getElementById("manageModal").classList.remove("hidden");
+    pushNav();
+  }
+}
+document.getElementById("openBosses").onclick = () => openManage("manageBoss", "보스 목록");
+document.getElementById("openRewards").onclick = () => openManage("manageReward", "보상 목록");
+document.getElementById("openGroups").onclick = () => openManage("manageGroup", "그룹");
+document.getElementById("manageClose").onclick = () => {
+  document.getElementById("manageModal").classList.add("hidden");
+  popNav();
 };
 document.getElementById("addGroup").onclick = () => {
   const name = document.getElementById("newGroup").value.trim();
