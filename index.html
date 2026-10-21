@@ -165,8 +165,7 @@
         <label>길마 · 부길마</label>
         <div class="row"><select id="leaderPick"></select><select id="vicePick"></select><select id="vicePick2"></select></div>
         <div class="actions"><button type="button" class="btn" id="saveRoles">직책 저장</button></div>
-        <button type="button" class="pick-row" id="openPlaces">보스 장소</button>
-        <button type="button" class="pick-row" id="openBosses">보스명</button>
+        <button type="button" class="pick-row" id="openBosses">보스</button>
         <button type="button" class="pick-row" id="openRewards">보상 목록</button>
         <button type="button" class="pick-row" id="openGroups">그룹</button>
         <label>길드원 추가</label>
@@ -1645,8 +1644,7 @@ function showBossPane(which){
   document.getElementById("showPlaces").classList.toggle("on", place);
   document.getElementById("showBossNames").classList.toggle("on", !place);
 }
-document.getElementById("openPlaces").onclick = () => { openManage("manageBoss", "보스 장소"); showBossPane("place"); };
-document.getElementById("openBosses").onclick = () => { openManage("manageBoss", "보스명"); showBossPane("name"); };
+document.getElementById("openBosses").onclick = () => { openManage("manageBoss", "보스"); showBossPane("place"); };
 document.getElementById("showPlaces").onclick = () => { showBossPane("place"); document.getElementById("manageTitle").textContent = "보스 장소"; };
 document.getElementById("showBossNames").onclick = () => { showBossPane("name"); document.getElementById("manageTitle").textContent = "보스명"; };
 document.getElementById("openRewards").onclick = () => openManage("manageReward", "보상 목록");
