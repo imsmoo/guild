@@ -165,7 +165,8 @@
         <label>길마 · 부길마</label>
         <div class="row"><select id="leaderPick"></select><select id="vicePick"></select><select id="vicePick2"></select></div>
         <div class="actions"><button type="button" class="btn" id="saveRoles">직책 저장</button></div>
-        <button type="button" class="pick-row" id="openBosses">보스 목록</button>
+        <button type="button" class="pick-row" id="openPlaces">보스 장소</button>
+        <button type="button" class="pick-row" id="openBosses">보스명</button>
         <button type="button" class="pick-row" id="openRewards">보상 목록</button>
         <button type="button" class="pick-row" id="openGroups">그룹</button>
         <label>길드원 추가</label>
@@ -209,18 +210,24 @@
     <h2 id="manageTitle" style="font-size:22px;margin-top:0">목록</h2>
     <div id="manageBoss">
       <div class="actions" style="margin-top:0">
-        <button type="button" class="btn" id="addPlaceBtn" style="flex:0 0 48px">+</button>
+        <button type="button" class="floor-tab" id="showPlaces">보스 장소</button>
+        <button type="button" class="floor-tab on" id="showBossNames">보스명</button>
       </div>
-      <div id="placeForm" class="row hidden">
-        <input id="newPlace" placeholder="격전지상층(1구역)" />
-        <button type="button" class="ghost" id="savePlace">추가</button>
+      <div id="placePane" class="hidden">
+        <div class="row">
+          <input id="newPlace" placeholder="장소 이름" />
+          <button type="button" class="ghost" id="savePlace">추가</button>
+        </div>
+        <div id="placeList"></div>
       </div>
-      <div class="row">
-        <input id="newBoss" placeholder="보스 이름" />
-        <select id="newBossFloor"></select>
-        <button type="button" class="ghost" id="addBoss">추가</button>
+      <div id="bossPane">
+        <div class="row">
+          <input id="newBoss" placeholder="보스 이름" />
+          <select id="newBossFloor"></select>
+          <button type="button" class="ghost" id="addBoss">추가</button>
+        </div>
+        <div id="bossList"></div>
       </div>
-      <div id="bossList"></div>
     </div>
     <div id="manageReward" class="hidden">
       <div class="row"><input id="newReward" placeholder="보상 이름" /><button type="button" class="ghost" id="addReward">추가</button></div>
@@ -306,6 +313,7 @@ if (!state.bossFloors) state.bossFloors = {};
 if (!state.history) state.history = [];
 if (!Array.isArray(state.schedules)) state.schedules = [];
 if (!Array.isArray(state.places)) state.places = [];
+if (!Array.isArray(state.removedFloors)) state.removedFloors = [];
 function ensureOccupation(){
   let changed = false;
   if (!state.bosses.includes("점령전보상")) { state.bosses.push("점령전보상"); changed = true; }
@@ -323,7 +331,7 @@ function payload(){
     leader:state.leader||"", vice:state.vice||"", vice2:state.vice2||"",
     history, dps:state.dps||[], dpsByBoss:state.dpsByBoss||{}, bossFloors:state.bossFloors||{},
     groups:state.groups||[], groupItems:state.groupItems||{}, bossDrops:state.bossDrops||{},
-    bossGroups:state.bossGroups||[], bossGroupOf:state.bossGroupOf||{}, places:state.places||[],
+    bossGroups:state.bossGroups||[], bossGroupOf:state.bossGroupOf||{}, places:state.places||[], removedFloors:state.removedFloors||[],
     schedule:state.schedule||null, schedules:state.schedules||[], firebaseUrl:state.firebaseUrl, room:state.room, rev:state.rev||1
   };
   if (history.length || allowEmptyHistory) body.historyCount = history.length;
@@ -450,7 +458,8 @@ function floorOf(name){
   return guessFloor(name);
 }
 function floors(){
-  return FLOORS.concat(Array.isArray(state.places) ? state.places : []);
+  const removed = new Set((state.removedFloors || []).map(String));
+  return FLOORS.concat(Array.isArray(state.places) ? state.places : []).filter(f => !removed.has(String(f.id)));
 }
 function floorOptions(selected){
   return floors().map(fl => '<option value="'+esc(fl.id)+'"'+(String(fl.id)===String(selected)?" selected":"")+">"+esc(fl.label)+"</option>").join("");
@@ -1445,18 +1454,34 @@ function renderSettings(){
   document.getElementById("vicePick2").innerHTML = "<option value=''>부길마 2</option>"+state.members.map(m => "<option"+(m===state.vice2?" selected":"")+">"+esc(m)+"</option>").join("");
   const floorSel = document.getElementById("newBossFloor");
   if (floorSel) floorSel.innerHTML = floorOptions(floorSel.value || "1");
-  const places = (state.places||[]).map((p,i) => '<div class="row" style="margin-top:8px"><span>'+esc(p.label)+'</span><button type="button" class="danger" data-del-place="'+i+'">삭제</button></div>').join("");
+  const places = floors().map(p => {
+    const custom = (state.places||[]).findIndex(x => x.id === p.id);
+    const del = custom >= 0 ? 'data-del-place="'+custom+'"' : 'data-hide-floor="'+esc(p.id)+'"';
+    return '<div class="row" style="margin-top:8px"><span>'+esc(p.label)+'</span><button type="button" class="danger" '+del+' style="flex:0 0 auto">삭제</button></div>';
+  }).join("");
+  const placeList = document.getElementById("placeList");
+  if (placeList) placeList.innerHTML = places || "<p class='muted'>장소가 없습니다.</p>";
   const bossRows = state.bosses.map((b,i) => {
     const f = floorOf(b);
     return '<div style="margin-top:8px"><div class="row"><span>'+esc(b)+'</span><select data-boss-floor="'+i+'">'+floorOptions(f)+'</select><button type="button" class="ghost" data-open-boss="'+esc(b)+'">보상</button><button type="button" class="danger" data-boss="'+i+'">삭제</button></div>'+dropEditor(b)+'</div>';
   }).join("");
-  document.getElementById("bossList").innerHTML = places+bossRows+'<div style="margin-top:8px"><div class="row"><span>'+NO_BOSS+'</span><button type="button" class="ghost" data-open-boss="'+NO_BOSS+'">보상</button></div>'+dropEditor(NO_BOSS)+'</div>';
+  document.getElementById("bossList").innerHTML = bossRows+'<div style="margin-top:8px"><div class="row"><span>'+NO_BOSS+'</span><button type="button" class="ghost" data-open-boss="'+NO_BOSS+'">보상</button></div>'+dropEditor(NO_BOSS)+'</div>';
   document.querySelectorAll("[data-del-place]").forEach(el => el.onclick = () => {
     const i = Number(el.dataset.delPlace);
     const place = (state.places||[])[i];
     if (!place) return;
     askDelete(place.label+" 장소를 지울까요?", () => {
       state.places.splice(i, 1);
+      save();
+      renderSettings();
+    });
+  });
+  document.querySelectorAll("[data-hide-floor]").forEach(el => el.onclick = () => {
+    const id = el.dataset.hideFloor;
+    const place = FLOORS.find(f => f.id === id);
+    askDelete((place ? place.label : "장소")+"을 지울까요?", () => {
+      if (!state.removedFloors) state.removedFloors = [];
+      if (!state.removedFloors.includes(id)) state.removedFloors.push(id);
       save();
       renderSettings();
     });
@@ -1574,11 +1599,6 @@ function renderSettings(){
     });
   });
 }
-document.getElementById("addPlaceBtn").onclick = () => {
-  const form = document.getElementById("placeForm");
-  form.classList.toggle("hidden");
-  if (!form.classList.contains("hidden")) document.getElementById("newPlace").focus();
-};
 document.getElementById("savePlace").onclick = () => {
   const name = document.getElementById("newPlace").value.trim();
   if (!name) return;
@@ -1586,7 +1606,6 @@ document.getElementById("savePlace").onclick = () => {
   if (floors().some(f => f.label === name)) return alert("이미 있는 장소입니다.");
   state.places.push({id:"c"+uid(), label:name});
   document.getElementById("newPlace").value = "";
-  document.getElementById("placeForm").classList.add("hidden");
   save();
   renderSettings();
 };
@@ -1619,7 +1638,17 @@ function openManage(panel, title){
     pushNav();
   }
 }
-document.getElementById("openBosses").onclick = () => openManage("manageBoss", "보스 목록");
+function showBossPane(which){
+  const place = which === "place";
+  document.getElementById("placePane").classList.toggle("hidden", !place);
+  document.getElementById("bossPane").classList.toggle("hidden", place);
+  document.getElementById("showPlaces").classList.toggle("on", place);
+  document.getElementById("showBossNames").classList.toggle("on", !place);
+}
+document.getElementById("openPlaces").onclick = () => { openManage("manageBoss", "보스 장소"); showBossPane("place"); };
+document.getElementById("openBosses").onclick = () => { openManage("manageBoss", "보스명"); showBossPane("name"); };
+document.getElementById("showPlaces").onclick = () => { showBossPane("place"); document.getElementById("manageTitle").textContent = "보스 장소"; };
+document.getElementById("showBossNames").onclick = () => { showBossPane("name"); document.getElementById("manageTitle").textContent = "보스명"; };
 document.getElementById("openRewards").onclick = () => openManage("manageReward", "보상 목록");
 document.getElementById("openGroups").onclick = () => openManage("manageGroup", "그룹");
 document.getElementById("manageClose").onclick = () => {
